@@ -1,0 +1,200 @@
+import UIKit
+
+class SelectionLayoutManager: NSLayoutManager {
+  
+  override func fillBackgroundRectArray(_ rectArray: UnsafePointer<CGRect>, count rectCount: Int, forCharacterRange charRange: NSRange, color: UIColor) {
+    let cornerRadius: CGFloat = 8
+    let horizontalInset: CGFloat = 5
+    
+    guard
+      let font = (textStorage?.attributes(at: 0, effectiveRange: nil).first { $0.key == .font })?.value as? UIFont,
+      let textContainerWidth = textContainers.first?.size.width
+      else { return }
+    
+    /// Divide the text into paragraphs
+    let lines = paragraphs(from: textStorage?.string ?? "")
+    
+    /// Divide the paragraphs into separate lines
+    let strings = detectLines(from: lines, width: textContainerWidth, font: font)
+    
+    /// Get rects from the lines
+    let rects = frames(for: strings, width: textContainerWidth, font: font)
+    
+    /// Get a contour by rects
+    let rectsPath = path(from: rects, cornerRadius: cornerRadius, horizontalInset: horizontalInset)
+    
+    /// Fill it
+    draw(rectsPath, color: color)
+  }
+  
+  private func paragraphs(from string: String) -> [String] {
+    return string.components(separatedBy: CharacterSet.newlines)
+  }
+  
+  private func detectLines(from paragraphs: [String], width: CGFloat, font: UIFont) -> [String] {
+    var strings: [String] = []
+    for paragraph in paragraphs {
+      let stringsFromLine = detectLines(from: paragraph, width: width, font: font)
+      strings.append(contentsOf: stringsFromLine)
+    }
+    
+    return strings
+  }
+  
+  /// Method works with .byWordWrapping break line mode. Return string array of element which full fill lines of textView
+  /// - Parameters:
+  ///   - string: string for spliting
+  ///   - width: width of textView
+  ///   - font: font of line and textView
+  private func detectLines(from string: String, width: CGFloat, font: UIFont) -> [String] {
+    var strings: [String] = []
+    var cumulativeString = ""
+    let words = string.components(separatedBy: CharacterSet.whitespaces)
+    
+    for word in words {
+      let checkingString = cumulativeString + word
+      if checkingString.size(withFont: font).width < width {
+        cumulativeString.append(word)
+      } else {
+        if cumulativeString.isNotEmpty {
+          strings.append(cumulativeString)
+        }
+        
+        if word.size(withFont: font).width < width {
+          cumulativeString = word
+        } else {
+          var stringsFromWord: [String] = []
+          var handlingWord = word
+          
+          while handlingWord.isNotEmpty {
+            let fullFillString = detectFullFillString(from: handlingWord, width: width, font: font)
+            stringsFromWord.append(fullFillString)
+            handlingWord = word.replacingOccurrences(of: stringsFromWord.reduce("") { $0 + $1 }, with: "")
+          }
+          
+          stringsFromWord.removeLast()
+          strings.append(contentsOf: stringsFromWord)
+          let remainString = word.replacingOccurrences(of: stringsFromWord.reduce("") { $0 + $1 }, with: "")
+          cumulativeString = remainString
+        }
+      }
+      
+    }
+    
+    if cumulativeString.isNotEmpty {
+      strings.append(cumulativeString)
+    }
+    
+    return strings
+  }
+  
+  
+  /// Detecting full fill line if word width more than view width
+  /// - Parameters:
+  ///   - word: big word for spliting
+  ///   - width: width of view
+  ///   - font: font of view and word
+  private func detectFullFillString(from word: String, width: CGFloat, font: UIFont) -> String {
+    var string = ""
+    
+    for character in word {
+      let checkingString = string.appending(String(character))
+      if checkingString.size(withFont: font).width > width {
+        break
+      } else {
+        string.append(contentsOf: String(character))
+      }
+    }
+    
+    return string
+  }
+  
+  private func frames(for lines: [String], width: CGFloat, font: UIFont) -> [CGRect] {
+    var rects: [CGRect] = []
+    let stringsSizes = lines.map { $0.size(withFont: font) }
+    stringsSizes.forEach {
+      let rect = CGRect(origin: CGPoint(x: (width - $0.width) / 2,
+                                        y: $0.height * CGFloat(rects.count)),
+                        size: $0)
+      rects.append(rect)
+    }
+    
+    return rects
+  }
+  
+  private func path(from rects: [CGRect], cornerRadius: CGFloat, horizontalInset: CGFloat) -> CGPath {
+    let path = CGMutablePath()
+    
+    rects.enumerated().forEach { (index, rect) in
+      
+      let hasPrevious = index > 0
+      let isPreviousWider = hasPrevious ? rects[index - 1].width >= rect.width || abs(rects[index - 1].width - rect.width) < 5 : false
+      
+      let hasNext = index != rects.count - 1
+      let isNextWider = hasNext ? rects[index + 1].width >= rect.width || abs(rects[index + 1].width - rect.width) < 5 : false
+      
+      path.move(to: CGPoint(x: rect.minX - horizontalInset + (isPreviousWider ? 0 : cornerRadius),
+                            y: rect.minY))
+      //      top
+      path.addLine(to: CGPoint(x: rect.maxX + horizontalInset - (isPreviousWider ? 0 : cornerRadius),
+                               y: rect.minY))
+      
+      if isPreviousWider == false {
+        path.addQuadCurve(to: CGPoint(x: rect.maxX + horizontalInset,
+                                      y: rect.minY + cornerRadius),
+                          control: CGPoint(x: rect.maxX + horizontalInset,
+                                           y: rect.minY))
+      }
+      
+      //      right
+      path.addLine(to: CGPoint(x: rect.maxX + horizontalInset,
+                               y: rect.maxY - (isNextWider ? 0 : cornerRadius)))
+      
+      if isNextWider == false {
+        path.addQuadCurve(to: CGPoint(x: rect.maxX + horizontalInset - cornerRadius,
+                                      y: rect.maxY),
+                          control: CGPoint(x: rect.maxX + horizontalInset,
+                                           y: rect.maxY))
+      }
+      
+      //      bottom
+      path.addLine(to: CGPoint(x: rect.minX - horizontalInset + (isNextWider ? 0 : cornerRadius),
+                               y: rect.maxY))
+      
+      if isNextWider == false {
+        path.addQuadCurve(to: CGPoint(x: rect.minX - horizontalInset,
+                                      y: rect.maxY - cornerRadius),
+                          control: CGPoint(x: rect.minX - horizontalInset,
+                                           y: rect.maxY))
+      }
+      
+      //      left
+      path.addLine(to: CGPoint(x: rect.minX - horizontalInset,
+                               y: rect.minY + (isPreviousWider ? 0 : cornerRadius)))
+      
+      if isPreviousWider == false {
+        path.addQuadCurve(to: CGPoint(x: rect.minX - horizontalInset + cornerRadius,
+                                      y: rect.minY),
+                          control: CGPoint(x: rect.minX - horizontalInset,
+                                           y: rect.minY))
+      }
+      
+      path.closeSubpath()
+      
+    }
+    
+    return path
+  }
+  
+  private func draw(_ path: CGPath, color: UIColor) {
+    color.set()
+    if let ctx = UIGraphicsGetCurrentContext() {
+      ctx.setAllowsAntialiasing(true)
+      ctx.setShouldAntialias(true)
+      
+      ctx.addPath(path)
+      ctx.drawPath(using: .fillStroke)
+    }
+  }
+  
+}
